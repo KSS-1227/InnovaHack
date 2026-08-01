@@ -1,0 +1,69 @@
+"""
+Query Service
+
+Wrapper around MMGraphRAG GraphRAGQuery.
+
+Responsibilities
+----------------
+1. Validate graph availability
+2. Execute GraphRAG query (single retrieval call via return_context=True)
+3. Pass pre-computed retrieval context to EvidenceEngine
+4. Return clean structured response — answer + evidence
+"""
+
+from pathlib import Path
+import time
+
+from backend.config import settings
+from backend.retrieval.query import GraphRAGQuery
+from backend.compliance.evidence_engine import EvidenceEngine
+
+
+class QueryService:
+
+    def __init__(self):
+        self.graph_path = (
+            Path(settings.OUTPUT_DIR) / f"{settings.MMKG_NAME}.graphml"
+        )
+
+    async def ask(self, question: str, top_k: int = 10) -> dict:
+        if not self.graph_path.exists():
+            raise FileNotFoundError(
+                "Knowledge Graph not found. Upload and process a document first."
+            )
+
+        start = time.time()
+
+        query_engine = GraphRAGQuery()
+
+        # Override retrieval size dynamically
+        settings.QueryParam.top_k = top_k
+
+        # Single call — retrieval happens exactly once inside query().
+        # return_context=True surfaces the already-computed similar_nodes
+        # and context strings; no second embedding call is made.
+        result = await query_engine.query(question, return_context=True)
+
+        answer           = result["answer"]
+        retrieval_context = result["retrieval"]
+
+        processing_time = round(time.time() - start, 2)
+
+        # EvidenceEngine receives the pre-computed retrieval context and
+        # the raw data stores — it performs zero similarity search itself.
+        evidence = EvidenceEngine().collect(
+            retrieval_context=retrieval_context,
+            graph=query_engine.graph,
+            text_chunks=query_engine.text_chunks,
+            image_data=query_engine.image_data,
+        )
+
+        return {
+            "answer": answer,
+            "evidence": evidence,
+            "processing_time_seconds": processing_time,
+            "graph": {
+                "nodes": query_engine.graph.number_of_nodes(),
+                "edges": query_engine.graph.number_of_edges(),
+            },
+        }
