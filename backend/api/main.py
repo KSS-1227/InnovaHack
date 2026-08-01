@@ -5,7 +5,9 @@ FastAPI Entry Point
 Hackathon Prototype
 """
 
-from fastapi import FastAPI
+import logging
+
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
@@ -13,10 +15,41 @@ import os
 # Load environment variables
 load_dotenv()
 
-from backend.api.routes.upload import router as upload_router
-from backend.api.routes.query import router as query_router
-from backend.api.routes.graph import router as graph_router
-from backend.api.routes.report import router as report_router
+from backend.config import ALLOWED_ORIGINS, SUPABASE_JWT_SECRET
+from backend.auth.middleware.jwt_middleware import get_current_user
+
+from backend.api.routes.cases import router as cases_router
+# Workspace-aware replacements (user-scoped paths — no global data folders)
+from backend.api.routes.workspace_upload import router as ws_upload_router
+from backend.api.routes.workspace_query import router as ws_query_router
+from backend.api.routes.workspace_graph import router as ws_graph_router
+from backend.api.routes.workspace_report import router as ws_report_router
+
+from backend.auth.routes.auth import router as auth_router
+from backend.auth.routes.profile import router as profile_router
+from backend.auth.routes.workspace import router as workspace_router
+from backend.auth.routes.audit import router as audit_router
+from backend.api.routes.storage import router as storage_router
+
+logger = logging.getLogger(__name__)
+
+# ------------------------------
+# Startup Guards (module-level)
+# ------------------------------
+
+if not ALLOWED_ORIGINS:
+    logger.critical("ALLOWED_ORIGINS is not set — refusing to start")
+    raise SystemExit(1)
+
+if not SUPABASE_JWT_SECRET:
+    logger.critical("SUPABASE_JWT_SECRET is not set — refusing to start")
+    raise SystemExit(1)
+
+_allowed_origins_list = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
+
+# ------------------------------
+# App
+# ------------------------------
 
 app = FastAPI(
     title="Enterprise Compliance Intelligence Platform",
@@ -42,20 +75,35 @@ Features:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ------------------------------
-# Routers
+# Routers — protected (JWT required)
 # ------------------------------
 
-app.include_router(upload_router, prefix="/api")
-app.include_router(query_router, prefix="/api")
-app.include_router(graph_router, prefix="/api")
-app.include_router(report_router, prefix="/api")
+# Workspace-aware routes (user-scoped, JWT required)
+# These replace the global upload/query/graph/report routers for all
+# authenticated requests. The old routers are kept imported above for
+# backward-compatibility with CLI scripts but are NOT registered.
+app.include_router(ws_upload_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(ws_query_router,  prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(ws_graph_router,  prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(ws_report_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(cases_router,     prefix="/api", dependencies=[Depends(get_current_user)])
+
+# ------------------------------
+# Routers — auth & workspace (endpoints handle their own auth internally)
+# ------------------------------
+
+app.include_router(auth_router, prefix="/api/auth")
+app.include_router(profile_router, prefix="/api/auth")
+app.include_router(workspace_router, prefix="/api/workspaces")
+app.include_router(audit_router, prefix="/api/workspaces")
+app.include_router(storage_router, prefix="/api", dependencies=[Depends(get_current_user)])
 
 
 # ------------------------------

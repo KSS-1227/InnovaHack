@@ -49,3 +49,15 @@ class QueryParam:
     local_max_token_for_text_unit: int = 4000
 
 RETRIEVAL_THRESHOLD: float = 0.2
+
+# ============ Auth / Supabase Configuration ============
+SUPABASE_URL              = os.environ.get("SUPABASE_URL",              "")
+SUPABASE_ANON_KEY         = os.environ.get("SUPABASE_ANON_KEY",         "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_JWT_SECRET       = os.environ.get("SUPABASE_JWT_SECRET",       "")
+
+# Derived automatically — do NOT set this in the environment
+SUPABASE_JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+
+# Comma-separated list of allowed CORS origins, e.g. "https://app.example.com,https://admin.example.com"
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "")
