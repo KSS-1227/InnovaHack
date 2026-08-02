@@ -229,6 +229,12 @@ export default function AIAssistantPage() {
 
         <div className="flex-1 overflow-y-auto px-8 py-8 space-y-8">
 
+          {!caseId.trim() && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-300">
+              ⚠️ Enter a <strong>Case ID</strong> in the left sidebar before sending a question.
+            </div>
+          )}
+
           {messages.length === 0 && (
 
             <div className="flex flex-col items-center justify-center h-full">
@@ -361,9 +367,10 @@ export default function AIAssistantPage() {
               </div>
 
               <button
-                disabled={loading || !question.trim()}
+                disabled={loading || !question.trim() || !caseId.trim()}
                 onClick={askQuestion}
                 className="flex items-center gap-2 rounded-xl bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 px-6 py-3 font-medium transition"
+                title={!caseId.trim() ? 'Enter a Case ID in the sidebar first' : ''}
               >
                 {loading ? (
                   <Loader2 className="animate-spin" size={18} />

@@ -109,3 +109,40 @@ async def relationships(
         }
         for source, target, edge in list(graph.edges(data=True))[:limit]
     ]
+
+
+@router.get("/network")
+async def graph_network(
+    case_id: str,
+    auth: AuthContext = Depends(get_current_user),
+):
+    """Return the full graph as a frontend-friendly {nodes, edges} payload.
+
+    Used by KnowledgeGraphPage to render the ReactFlow force-directed graph.
+    """
+    await _verify_case_ownership(case_id=case_id, user_id=auth.user_id)
+    ws    = UserWorkspace(user_id=auth.user_id, case_id=case_id)
+    graph = _load_graph(ws)
+
+    nodes = [
+        {
+            "id":          str(node_id),
+            "label":       str(node_data.get("label") or node_id),
+            "type":        str(node_data.get("entity_type") or node_data.get("type") or "UNKNOWN"),
+            "description": str(node_data.get("description") or ""),
+        }
+        for node_id, node_data in graph.nodes(data=True)
+    ]
+
+    edges = [
+        {
+            "id":          f"{source}->{target}",
+            "source":      str(source),
+            "target":      str(target),
+            "weight":      edge_data.get("weight", 1),
+            "description": str(edge_data.get("description") or ""),
+        }
+        for source, target, edge_data in graph.edges(data=True)
+    ]
+
+    return {"nodes": nodes, "edges": edges}

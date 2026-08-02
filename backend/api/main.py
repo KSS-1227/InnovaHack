@@ -96,7 +96,8 @@ app.include_router(ws_query_router,  prefix="/api", dependencies=[Depends(get_cu
 app.include_router(ws_graph_router,  prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(ws_report_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(cases_router,     prefix="/api", dependencies=[Depends(get_current_user)])
-app.include_router(global_graph_router, prefix="/api", dependencies=[Depends(get_current_user)])
+# global_graph_router mounted at /api/graph-global to avoid shadowing ws_graph_router at /api/graph
+app.include_router(global_graph_router, prefix="/api/graph-global", dependencies=[Depends(get_current_user)])
 
 # ------------------------------
 # Routers — auth & workspace (endpoints handle their own auth internally)
@@ -140,7 +141,7 @@ async def health():
 
     return {
         "status": "healthy",
-        "openai_key_loaded": bool(os.getenv("OPENAI_API_KEY")),
+        "openai_key_loaded": bool(os.getenv("LLM_API_KEY")),
         "graph_engine": "MMGraphRAG",
         "prototype": True
     }

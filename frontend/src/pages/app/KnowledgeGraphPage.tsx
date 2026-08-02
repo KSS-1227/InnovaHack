@@ -109,8 +109,17 @@ export default function KnowledgeGraphPage() {
   const [selectedNode, setSelectedNode] = useState<Node<GraphNodeData> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [caseId, setCaseId] = useState<string>(() => {
+    // Try to restore case_id from localStorage (set by UploadPage after upload)
+    try { return localStorage.getItem('innova_last_case_id') ?? '' } catch { return '' }
+  })
 
   const loadGraph = useCallback(async () => {
+    if (!caseId.trim()) {
+      setLoading(false)
+      setError('Enter a Case ID to load the knowledge graph.')
+      return
+    }
     setLoading(true)
     setError(null)
 
@@ -120,7 +129,7 @@ export default function KnowledgeGraphPage() {
     if (workspaceId) headers['X-Workspace-ID'] = workspaceId
 
     try {
-      const response = await fetch('/api/graph/network', { headers })
+      const response = await fetch(`/api/graph/network?case_id=${encodeURIComponent(caseId)}`, { headers })
       if (!response.ok) throw new Error(`Unable to load graph (${response.status})`)
 
       const payload = (await response.json()) as NetworkPayload
@@ -133,7 +142,7 @@ export default function KnowledgeGraphPage() {
     } finally {
       setLoading(false)
     }
-  }, [setEdges, setNodes, workspaceId])
+  }, [setEdges, setNodes, workspaceId, caseId])
 
   useEffect(() => {
     void loadGraph()
@@ -179,9 +188,17 @@ export default function KnowledgeGraphPage() {
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Knowledge Graph</h1>
           <p className="mt-2 text-sm text-zinc-400">Explore entities and the relationships connecting them.</p>
         </div>
-        <button onClick={() => void loadGraph()} disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-medium text-cyan-300 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60">
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh graph
-        </button>
+        <div className="flex gap-2 items-center">
+          <input
+            value={caseId}
+            onChange={(e) => setCaseId(e.target.value)}
+            placeholder="Paste Case ID..."
+            className="rounded-xl border border-white/10 bg-zinc-950/70 px-3 py-2.5 text-sm text-white outline-none w-64 placeholder:text-zinc-500"
+          />
+          <button onClick={() => void loadGraph()} disabled={loading || !caseId.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-medium text-cyan-300 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60">
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Load graph
+          </button>
+        </div>
       </div>
 
       <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">

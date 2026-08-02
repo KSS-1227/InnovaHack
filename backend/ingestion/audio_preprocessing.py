@@ -45,7 +45,7 @@ class AudioChunking:
         self.working_dir = working_dir
 
         self.client = OpenAI(
-            api_key=settings.LLM_API_KEY
+            api_key=settings.API_KEY
         )
 
     # ---------------------------------------------------------
