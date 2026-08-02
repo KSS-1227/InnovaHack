@@ -30,6 +30,7 @@ import WorkspaceSelectPage from './pages/WorkspaceSelectPage'
 import WorkspacePlaceholder from './pages/app/WorkspacePlaceholder'
 import DashboardPage from './pages/app/DashboardPage'
 import UploadPage from './pages/app/UploadPage'
+import KnowledgeGraphPage from './pages/app/KnowledgeGraphPage.tsx'
 
 // ─────────────────────────────────────────────────────────
 // Root redirect
@@ -125,7 +126,7 @@ function AnimatedRoutes() {
             <Route path="upload"         element={<UploadPage />} />
 
             {/* Intelligence section */}
-            <Route path="knowledge-graph" element={<WorkspacePlaceholder />} />
+            <Route path="knowledge-graph" element={<KnowledgeGraphPage />} />
             <Route path="ai-assistant"    element={<WorkspacePlaceholder />} />
             <Route path="evidence"        element={<WorkspacePlaceholder />} />
             <Route path="reports"         element={<WorkspacePlaceholder />} />

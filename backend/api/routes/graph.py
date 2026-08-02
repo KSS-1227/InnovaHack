@@ -11,6 +11,8 @@ It simply exposes graph information in a FastAPI-friendly way.
 from fastapi import APIRouter, HTTPException
 import networkx as nx
 
+from backend.config import settings
+
 # Note: this route is not registered in main.py (kept for CLI use only)
 # from backend.config import settings  # settings object does not exist; use flat vars instead
 
@@ -127,3 +129,32 @@ async def relationships(limit: int = 100):
         })
 
     return response
+
+
+@router.get("/network")
+async def graph_network():
+    """Serialize the loaded graph into a frontend-friendly network payload."""
+    graph = _load_graph()
+
+    nodes = [
+        {
+            "id": str(node_id),
+            "label": str(node_data.get("label") or node_id),
+            "type": str(node_data.get("entity_type") or node_data.get("type") or "UNKNOWN"),
+            "description": str(node_data.get("description") or ""),
+        }
+        for node_id, node_data in graph.nodes(data=True)
+    ]
+
+    edges = [
+        {
+            "id": f"{source}->{target}",
+            "source": str(source),
+            "target": str(target),
+            "weight": edge_data.get("weight", 1),
+            "description": str(edge_data.get("description") or ""),
+        }
+        for source, target, edge_data in graph.edges(data=True)
+    ]
+
+    return {"nodes": nodes, "edges": edges}

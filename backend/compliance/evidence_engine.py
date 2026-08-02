@@ -103,7 +103,7 @@ class EvidenceEngine:
                 content = chunk.get("content", "")
                 evidence["text_chunks"].append({
                     "chunk_id": sid,
-                    "content":  content,
+                    "text":     content,
                     "tokens":   len(content.split()),
                 })
 

@@ -30,9 +30,10 @@ async def ask_question(request: QueryRequest):
             top_k=request.top_k,
         )
         return {
-            "success":  True,
-            "question": request.question,
-            "result":   result,
+            "answer":                   result["answer"],
+            "evidence":                 result["evidence"],
+            "processing_time_seconds":  result["processing_time_seconds"],
+            "graph":                    result["graph"],
         }
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
