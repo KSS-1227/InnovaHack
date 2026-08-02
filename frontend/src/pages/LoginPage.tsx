@@ -1,5 +1,5 @@
 import { type FormEvent, useId, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Lock, Mail, ArrowRight } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { AuthLayout } from '../components/ui/AuthLayout'
@@ -12,6 +12,9 @@ import { OAuthProviders } from '../components/auth/OAuthProviders'
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  // HIGH-2: Read the location the user was trying to reach before being redirected to login
+  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/workspaces'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -33,7 +36,7 @@ export default function LoginPage() {
     setIsSubmitting(true)
     try {
       await login(email, password)
-      navigate('/workspaces')
+      navigate(from, { replace: true })
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Invalid credentials'
       if (msg.toLowerCase().includes('invalid login credentials')) {

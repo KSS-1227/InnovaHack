@@ -264,3 +264,6 @@ class PdfChunking:
             await cache_kv.index_done_callback()
 
         return [full_text], list(image_data.keys())
+
+
+chunking_func_pdf2md = PdfChunking

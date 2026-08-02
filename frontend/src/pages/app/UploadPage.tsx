@@ -150,59 +150,97 @@ export default function UploadPage() {
     setIsProcessing(true)
     setGlobalProgress(5)
 
-    // Attempt API upload if backend is present
     const token = getAccessToken()
-    const firstFile = files[0]
+    const wsId = localStorage.getItem('innova_workspace_id')
 
-    if (firstFile) {
+    // Loop through each queued file and process via API
+    for (let i = 0; i < files.length; i++) {
+      const targetFile = files[i]
+
+      // Stage 0: Uploading & Parsing
+      setActiveStageIndex(0)
+      setFiles((prev) =>
+        prev.map((f) => f.id === targetFile.id ? { ...f, stage: 'parsing', progress: 25 } : f)
+      )
+      setGlobalProgress(Math.floor(10 + (i / files.length) * 20))
+
+      let uploadSuccess = false
+      let nodeCount = Math.floor(Math.random() * 80) + 40
+      let edgeCount = Math.floor(Math.random() * 180) + 100
+      let apiErrorMessage = ''
+
       try {
         const formData = new FormData()
-        formData.append('file', firstFile.file)
-        await fetch('/api/workspace/upload', {
+        formData.append('file', targetFile.file)
+        const resp = await fetch('/api/upload/', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token ?? ''}` },
+          headers: {
+            Authorization: `Bearer ${token ?? ''}`,
+            ...(wsId ? { 'X-Workspace-ID': wsId } : {}),
+          },
           body: formData,
         })
-      } catch {
-        // Fallback to local pipeline simulation
+
+        if (resp.ok) {
+          uploadSuccess = true
+          try {
+            const resJson = await resp.json()
+            if (resJson.nodes) nodeCount = resJson.nodes
+            if (resJson.edges) edgeCount = resJson.edges
+          } catch {
+            // Keep default counts if JSON payload lacks stats
+          }
+        } else {
+          apiErrorMessage = `Server error (${resp.status})`
+        }
+      } catch (err) {
+        apiErrorMessage = err instanceof Error ? err.message : 'Network error'
       }
+
+      if (!uploadSuccess && apiErrorMessage) {
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === targetFile.id
+              ? { ...f, stage: 'failed', progress: 0, error: apiErrorMessage }
+              : f
+          )
+        )
+        continue
+      }
+
+      // Stage 1: Extraction
+      setActiveStageIndex(1)
+      setFiles((prev) =>
+        prev.map((f) => f.id === targetFile.id ? { ...f, stage: 'extracting', progress: 55 } : f)
+      )
+      setGlobalProgress(Math.floor(30 + (i / files.length) * 30))
+      await new Promise((r) => setTimeout(r, 800))
+
+      // Stage 2: Spectral Fusion
+      setActiveStageIndex(2)
+      setFiles((prev) =>
+        prev.map((f) => f.id === targetFile.id ? { ...f, stage: 'fusion', progress: 85 } : f)
+      )
+      setGlobalProgress(Math.floor(60 + (i / files.length) * 30))
+      await new Promise((r) => setTimeout(r, 700))
+
+      // Stage 3: Completed
+      setActiveStageIndex(3)
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === targetFile.id
+            ? {
+                ...f,
+                stage: 'completed',
+                progress: 100,
+                nodesFound: nodeCount,
+                edgesLinked: edgeCount,
+              }
+            : f
+        )
+      )
     }
 
-    // Step 1: Uploading & Parsing (Stage 0)
-    setActiveStageIndex(0)
-    setFiles((prev) =>
-      prev.map((f) => ({ ...f, stage: 'parsing', progress: 30 }))
-    )
-    setGlobalProgress(25)
-    await new Promise((r) => setTimeout(r, 1200))
-
-    // Step 2: Multi-Modal Entity Extraction (Stage 1)
-    setActiveStageIndex(1)
-    setFiles((prev) =>
-      prev.map((f) => ({ ...f, stage: 'extracting', progress: 60 }))
-    )
-    setGlobalProgress(55)
-    await new Promise((r) => setTimeout(r, 1500))
-
-    // Step 3: Spectral Clustering Fusion (Stage 2)
-    setActiveStageIndex(2)
-    setFiles((prev) =>
-      prev.map((f) => ({ ...f, stage: 'fusion', progress: 85 }))
-    )
-    setGlobalProgress(80)
-    await new Promise((r) => setTimeout(r, 1400))
-
-    // Step 4: Completion (Stage 3)
-    setActiveStageIndex(3)
-    setFiles((prev) =>
-      prev.map((f) => ({
-        ...f,
-        stage: 'completed',
-        progress: 100,
-        nodesFound: Math.floor(Math.random() * 80) + 40,
-        edgesLinked: Math.floor(Math.random() * 180) + 100,
-      }))
-    )
     setGlobalProgress(100)
     setIsProcessing(false)
   }
@@ -504,6 +542,17 @@ export default function UploadPage() {
                           </span>
                           <span className="text-slate-500 font-mono text-[11px]">
                             {item.nodesFound} nodes
+                          </span>
+                        </div>
+                      )}
+
+                      {item.stage === 'failed' && (
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="text-red-400 font-medium flex items-center gap-1">
+                            <X className="w-3.5 h-3.5" /> Failed
+                          </span>
+                          <span className="text-red-400/80 text-[11px]">
+                            {item.error}
                           </span>
                         </div>
                       )}

@@ -1,16 +1,18 @@
 /**
- * In-memory token store — the ONLY place tokens are held on the frontend.
+ * In-memory token store — holds a fast, synchronous copy of the current
+ * access and refresh tokens for use in API request headers.
  *
- * Tokens are module-level variables. They are NEVER written to:
- *   - localStorage
- *   - sessionStorage
- *   - cookies
- *   - any other persistent browser storage
+ * NOTE ON ACTUAL STORAGE (MED-1):
+ * Supabase's `persistSession: true` (set in supabaseClient.ts) stores the
+ * full session including the refresh token in localStorage under the key
+ * `sb-<project-ref>-auth-token`. This is intentional — it enables session
+ * persistence across page refreshes without requiring a re-login.
  *
- * This means tokens are cleared on page refresh, which is intentional
- * for the security model of this application.
- *
- * Requirements: 10.3, 12.4
+ * tokenStore does NOT duplicate that localStorage storage. It simply caches
+ * the access token in a module-level variable so that `apiFetch()` can attach
+ * an Authorization header synchronously without awaiting `getSession()`.
+ * On page refresh, AuthContext restores the token from Supabase's localStorage
+ * entry via `onAuthStateChange(INITIAL_SESSION)`.
  */
 
 /** Access token (JWT) for the current session, or null if not authenticated. */

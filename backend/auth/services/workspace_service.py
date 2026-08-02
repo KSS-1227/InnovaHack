@@ -188,7 +188,7 @@ async def create_workspace(owner_id: str, name: str) -> dict:
     return {
         "workspace_id": workspace_id,
         "name": name,
-        "created_at": now,
+        "created_at": now.isoformat(),
         "member_count": 1,
         "role": "Admin",
     }

@@ -1,6 +1,6 @@
-import { type FormEvent, useId, useState } from 'react'
+import { type FormEvent, useEffect, useId, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Mail, Lock, ArrowLeft, CheckCircle2, ArrowRight, KeyRound } from 'lucide-react'
+import { Mail, Lock, ArrowLeft, CheckCircle2, ArrowRight, KeyRound, X } from 'lucide-react'
 import { supabase } from '../auth/supabaseClient'
 import { AuthLayout } from '../components/ui/AuthLayout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card'
@@ -144,9 +144,22 @@ function ConfirmView() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // MED-6: Guard — verify a real recovery session exists before showing the form
+  const [sessionChecked, setSessionChecked] = useState(false)
+  const [sessionValid, setSessionValid] = useState(false)
 
   const newPasswordId = useId()
   const confirmPasswordId = useId()
+
+  // Verify the Supabase recovery session on mount.
+  // Supabase's detectSessionInUrl:true processes the hash token automatically,
+  // but we must wait for that to complete before calling updateUser().
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSessionValid(!!data.session?.user)
+      setSessionChecked(true)
+    })
+  }, [])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -169,14 +182,51 @@ function ConfirmView() {
       const { error: supaErr } = await supabase.auth.updateUser({ password: newPassword })
       if (supaErr) throw supaErr
       setSuccess(true)
-      setTimeout(() => {
-        navigate('/login')
-      }, 3000)
+      setTimeout(() => { navigate('/login') }, 3000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to update password.')
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  // Still waiting for session check
+  if (!sessionChecked) {
+    return (
+      <Card glass className="text-center">
+        <CardContent className="py-12">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+            <p className="text-sm text-slate-400">Verifying reset link…</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // No valid recovery session — link is invalid or expired
+  if (!sessionValid) {
+    return (
+      <Card glass className="text-center">
+        <CardHeader className="items-center">
+          <div className="w-12 h-12 rounded-2xl bg-red-500/20 border border-red-500/40 text-red-400 flex items-center justify-center mb-2">
+            <X className="w-6 h-6" />
+          </div>
+          <CardTitle>Link Invalid or Expired</CardTitle>
+          <CardDescription>
+            This password reset link has already been used or has expired. Please request a new one.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Button variant="primary" fullWidth onClick={() => navigate('/password-reset')}>
+            Request new link
+          </Button>
+          <Link to="/login" className="text-xs text-slate-500 hover:text-slate-300 transition-colors text-center">
+            Back to login
+          </Link>
+        </CardContent>
+      </Card>
+    )
   }
 
   if (success) {

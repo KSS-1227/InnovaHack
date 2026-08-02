@@ -82,15 +82,23 @@ function OAuthCallbackPage() {
 
 
 // ─────────────────────────────────────────────────────────
-// App-level router with AnimatePresence
+// App-level router
+// MED-3: AnimatePresence only keys on auth-level route changes.
+// AppShell has its own inner AnimatePresence for /app/* sub-routes,
+// so we must NOT re-key the outer wrapper on every sub-route change —
+// that would cause the sidebar and topnav to flicker on every navigation.
 // ─────────────────────────────────────────────────────────
+
+const AUTH_ROUTES = new Set(['/login', '/register', '/password-reset', '/auth/callback', '/'])
 
 function AnimatedRoutes() {
   const location = useLocation()
+  // Only animate at the auth↔app boundary, not on every /app/* sub-route change
+  const animationKey = AUTH_ROUTES.has(location.pathname) ? location.pathname : 'app-shell'
 
   return (
     <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
+      <Routes location={location} key={animationKey}>
         {/* Root */}
         <Route path="/" element={<RootRedirect />} />
 

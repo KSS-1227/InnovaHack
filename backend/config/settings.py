@@ -1,17 +1,14 @@
 """
 Runtime configuration for the Enterprise Compliance Intelligence Platform.
-
-All tuneable parameters live here.  API keys should be supplied via
-environment variables; the placeholder strings below are defaults that
-will raise obvious errors rather than silently calling the wrong endpoint.
-
-Directory layout (relative to project root):
-  data/input/    — source PDFs
-  data/working/  — intermediate build artefacts  (gitignored)
-  data/output/   — final knowledge-graph files    (gitignored)
-  data/cache/    — LLM response cache             (gitignored)
+...
 """
 import os
+from dotenv import load_dotenv
+
+# Load .env BEFORE any os.environ.get() calls so env vars are available
+# regardless of import order (uvicorn reloader imports config before main.py).
+load_dotenv()
+
 from sentence_transformers import SentenceTransformer
 
 # ============ LLM Configuration ============
@@ -24,7 +21,8 @@ MM_API_BASE  = os.environ.get("MM_API_BASE",   "https://dashscope.aliyuncs.com/c
 MM_MODEL_NAME = os.environ.get("MM_MODEL_NAME", "qwen-vl-max")
 
 # ============ Embedding Model ============
-EMBEDDING_MODEL_DIR = os.environ.get("EMBEDDING_MODEL_DIR", "./models/all-MiniLM-L6-v2")
+_default_embed_dir = "./models/all-MiniLM-L6-v2" if os.path.exists("./models/all-MiniLM-L6-v2") else "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL_DIR = os.environ.get("EMBEDDING_MODEL_DIR", _default_embed_dir)
 EMBED_MODEL = SentenceTransformer(EMBEDDING_MODEL_DIR, device="cpu")
 
 # ============ Directory Paths ============

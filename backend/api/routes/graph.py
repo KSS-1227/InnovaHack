@@ -11,7 +11,8 @@ It simply exposes graph information in a FastAPI-friendly way.
 from fastapi import APIRouter, HTTPException
 import networkx as nx
 
-from backend.config import settings
+# Note: this route is not registered in main.py (kept for CLI use only)
+# from backend.config import settings  # settings object does not exist; use flat vars instead
 
 router = APIRouter(
     prefix="/graph",

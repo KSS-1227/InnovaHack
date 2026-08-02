@@ -48,6 +48,7 @@ async def list_workspaces(
     return JSONResponse(status_code=200, content=workspaces)
 
 
+@router.post("")
 @router.post("/")
 async def create_workspace(
     body: WorkspaceCreateRequest,

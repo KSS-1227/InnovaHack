@@ -2,6 +2,7 @@ import { type FormEvent, useId, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { User, Mail, Lock, CheckCircle2, ArrowRight } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
+import { supabase } from '../auth/supabaseClient'
 import { AuthLayout } from '../components/ui/AuthLayout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
@@ -50,11 +51,19 @@ export default function RegisterPage() {
 
     setIsSubmitting(true)
     try {
-      await register(email, password)
-      setSuccess(true)
-      setTimeout(() => {
-        navigate('/login')
-      }, 4000)
+      // Pass displayName so it is stored in Supabase user_metadata (CRIT-5)
+      await register(email, password, displayName.trim())
+
+      // LOW-6: Check if Supabase returned a session immediately (email confirmation disabled).
+      // If so, the user is already logged in — send them to /workspaces.
+      // If no session, email confirmation is required — show the verification message.
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        navigate('/workspaces', { replace: true })
+      } else {
+        setSuccess(true)
+        setTimeout(() => { navigate('/login') }, 4000)
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Registration failed. Please try again.')
     } finally {

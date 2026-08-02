@@ -27,7 +27,12 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Side
   const navigate = useNavigate()
 
   async function handleLogout() {
-    await logout()
+    try {
+      await logout()
+    } catch (err) {
+      // LOW-5: Don't let a network error block the user from being signed out locally
+      console.error('Logout error:', err)
+    }
     navigate('/login')
   }
 

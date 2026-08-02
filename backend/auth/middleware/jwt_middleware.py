@@ -23,7 +23,7 @@ from jose import ExpiredSignatureError, JWTError, jwt
 from pydantic import BaseModel
 
 from backend.auth.supabase_client import get_supabase_client
-from backend.config import SUPABASE_JWKS_URL, SUPABASE_URL
+from backend.config import SUPABASE_JWKS_URL, SUPABASE_JWT_SECRET, SUPABASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -125,36 +125,63 @@ async def get_current_user(
         )
 
     # ── 3. Decode & verify the JWT ────────────────────────────────────────
-    try:
-        payload: dict[str, Any] = jwt.decode(
-            token,
-            jwks,
-            algorithms=["RS256"],
-            options={"verify_aud": False},
-            issuer=f"{SUPABASE_URL}/auth/v1",
-        )
-    except ExpiredSignatureError:
+    # Supabase may sign with HS256 (JWT secret) or ES256/RS256 (JWKS).
+    # Try HS256 first, then fall back to JWKS for asymmetric algorithms.
+    payload: dict[str, Any] | None = None
+    last_error: Exception | None = None
+
+    # Attempt 1: HS256 with the JWT secret (older Supabase projects)
+    if SUPABASE_JWT_SECRET:
+        try:
+            payload = jwt.decode(
+                token,
+                SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                options={"verify_aud": False},
+                issuer=f"{SUPABASE_URL}/auth/v1",
+            )
+        except (ExpiredSignatureError, JWTError) as exc:
+            logger.warning("HS256 decode failed: %s | token_prefix=%s", exc, token[:40])
+            last_error = exc
+
+    # Attempt 2: ES256/RS256 via JWKS (newer Supabase projects using asymmetric keys)
+    if payload is None:
+        try:
+            payload = jwt.decode(
+                token,
+                jwks,
+                algorithms=["RS256", "ES256"],
+                options={"verify_aud": False},
+                issuer=f"{SUPABASE_URL}/auth/v1",
+            )
+        except ExpiredSignatureError:
+            raise HTTPException(
+                status_code=401,
+                detail={"error": "token_expired", "message": "Token has expired"},
+            )
+        except JWTError as exc:
+            logger.warning("JWKS decode failed: %s", exc)
+            last_error = exc
+
+    if payload is None:
+        if isinstance(last_error, ExpiredSignatureError):
+            raise HTTPException(
+                status_code=401,
+                detail={"error": "token_expired", "message": "Token has expired"},
+            )
         raise HTTPException(
             status_code=401,
-            detail={
-                "error": "token_expired",
-                "message": "Token has expired",
-            },
-        )
-    except JWTError:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error": "invalid_token",
-                "message": "Token signature is invalid",
-            },
+            detail={"error": "invalid_token", "message": "Token signature is invalid"},
         )
 
     # ── 4. Extract user_id (sub) ──────────────────────────────────────────
     user_id: str = payload.get("sub", "")
 
     # ── 5. Extract and validate role ─────────────────────────────────────
-    role: str | None = payload.get("role")
+    # Supabase puts "authenticated" in the top-level `role` claim.
+    # The app-specific role (Admin / Analyst / Viewer) lives in app_metadata.
+    app_metadata: dict = payload.get("app_metadata") or {}
+    role: str | None = app_metadata.get("role") or payload.get("role")
     if role is None:
         raise HTTPException(
             status_code=403,
@@ -164,10 +191,9 @@ async def get_current_user(
             },
         )
     if role not in _VALID_ROLES:
-        raise HTTPException(
-            status_code=403,
-            detail={"error": "unrecognised_role"},
-        )
+        # Fall back to a default role of Viewer for users who haven't been
+        # assigned a custom role yet (e.g. freshly signed-up users).
+        role = "Viewer"
 
     # ── 6. Resolve workspace from header ─────────────────────────────────
     workspace_id: str = request.headers.get("X-Workspace-ID", "")

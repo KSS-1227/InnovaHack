@@ -135,7 +135,7 @@ export function TopNav({ onMobileMenuOpen }: TopNavProps) {
           className="md:hidden w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-white/8 transition-all"
           aria-label="Open menu"
         >
-          <Menu className="w-4.5 h-4.5" />
+          <Menu className="w-[18px] h-[18px]" />
         </button>
 
         {/* Breadcrumb */}

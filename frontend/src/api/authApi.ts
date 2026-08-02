@@ -118,6 +118,7 @@ async function silentRefresh(): Promise<boolean> {
     const { data, error } = await supabase.auth.refreshSession()
     if (error || !data.session) {
       clearTokens()
+      try { localStorage.removeItem('innova_workspace_id') } catch { /* ignore */ }
       window.location.href = '/login'
       return false
     }
@@ -125,6 +126,7 @@ async function silentRefresh(): Promise<boolean> {
     return true
   } catch {
     clearTokens()
+    try { localStorage.removeItem('innova_workspace_id') } catch { /* ignore */ }
     window.location.href = '/login'
     return false
   }
@@ -186,6 +188,7 @@ async function apiFetch<T>(
     // If still 401 after refresh, redirect and abort
     if (resp.status === 401) {
       clearTokens()
+      try { localStorage.removeItem('innova_workspace_id') } catch { /* ignore */ }
       window.location.href = '/login'
       throw new Error('Session expired')
     }

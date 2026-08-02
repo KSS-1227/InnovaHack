@@ -47,7 +47,7 @@ export function SidebarNavItem({ item, collapsed }: Props) {
                 : 'text-slate-500 group-hover:text-slate-300'
             }`}
           >
-            <Icon className="w-4.5 h-4.5" strokeWidth={isActive ? 2.2 : 1.8} />
+            <Icon className="w-[18px] h-[18px]" strokeWidth={isActive ? 2.2 : 1.8} />
           </div>
 
           {/* Label */}

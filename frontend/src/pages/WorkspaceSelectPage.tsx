@@ -1,8 +1,15 @@
 /**
  * Workspace selection page — shown after login.
- * Redesigned with Ant Gravity design philosophy.
+ *
+ * Fixes applied:
+ *  - HIGH-1: Removed silent fallback to fake DEMO_WORKSPACES. Now shows real
+ *            error state when the API fails, preventing fake IDs being sent to backend.
+ *  - HIGH-5: Workspace creation now calls the backend API. Workspace is only
+ *            added to UI state if the API call succeeds.
+ *  - MED-4:  Replaced native browser prompt() with a styled inline form.
+ *  - MED-5:  DEMO_WORKSPACES removed entirely — no longer defined inside component.
  */
-import { useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -13,14 +20,18 @@ import {
   Sparkles,
   ChevronRight,
   Shield,
+  X,
+  RefreshCw,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { getAccessToken } from '../auth/tokenStore'
+import { getAccessToken, setTokens } from '../auth/tokenStore'
+import { supabase } from '../auth/supabaseClient'
 import { FloatingParticles } from '../components/ui/FloatingParticles'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Skeleton } from '../components/ui/Skeleton'
+import { Input } from '../components/ui/Input'
 
 interface Workspace {
   workspace_id: string
@@ -46,7 +57,7 @@ function WorkspaceSkeleton() {
 }
 
 export default function WorkspaceSelectPage() {
-  const { selectWorkspace, logout, user } = useAuth()
+  const { selectWorkspace, logout, user, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
@@ -55,85 +66,186 @@ export default function WorkspaceSelectPage() {
   const [selecting, setSelecting] = useState<string | null>(null)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
 
-  const DEMO_WORKSPACES: Workspace[] = [
-    { workspace_id: 'default-workspace', name: 'Compliance Intelligence Hub', owner_id: user?.id ?? 'user' },
-    { workspace_id: 'legal-docs', name: 'Legal Document Analysis', owner_id: user?.id ?? 'user' },
-    { workspace_id: 'audit-workspace', name: 'Financial Audit Workspace', owner_id: user?.id ?? 'user' },
-  ]
+  // MED-4: Inline create form state (replaces browser prompt())
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [newWorkspaceName, setNewWorkspaceName] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const createInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    async function fetchWorkspaces() {
-      try {
-        const token = getAccessToken()
-        const resp = await fetch('/api/workspaces', {
-          headers: { Authorization: `Bearer ${token ?? ''}` },
-        })
+  // ── Fetch workspaces ───────────────────────────────────────────────────
 
-        const text = await resp.text()
-        let data: unknown = null
-        if (text) {
-          try {
-            data = JSON.parse(text)
-          } catch {
-            data = null
-          }
+  async function fetchWorkspaces() {
+    setIsLoading(true)
+    setError(null)
+    try {
+      let token = getAccessToken()
+
+      // If no token in memory, try to restore from Supabase session
+      if (!token) {
+        const { data } = await supabase.auth.getSession()
+        if (data.session) {
+          setTokens(data.session.access_token, data.session.refresh_token)
+          token = data.session.access_token
         }
+      }
 
-        if (!resp.ok) {
-          // If backend server returns error (e.g., 401, 502 Proxy error), fallback to demo workspaces
-          console.warn('Backend API workspace request returned status:', resp.status)
-          setWorkspaces(DEMO_WORKSPACES)
+      const resp = await fetch('/api/workspaces', {
+        headers: { Authorization: `Bearer ${token ?? ''}` },
+      })
+
+      // If 401, try to refresh the token once then retry
+      if (resp.status === 401) {
+        const { data, error } = await supabase.auth.refreshSession()
+        if (error || !data.session) {
+          // Refresh failed — session is truly expired, redirect to login
+          void logout()
           return
         }
-
-        if (Array.isArray(data) && data.length > 0) {
-          setWorkspaces(data as Workspace[])
-        } else {
-          setWorkspaces(DEMO_WORKSPACES)
+        setTokens(data.session.access_token, data.session.refresh_token)
+        // Retry with fresh token
+        const retryResp = await fetch('/api/workspaces', {
+          headers: { Authorization: `Bearer ${data.session.access_token}` },
+        })
+        if (!retryResp.ok) {
+          setError(`Failed to load workspaces (${retryResp.status}). Please try again.`)
+          return
         }
-      } catch (err: unknown) {
-        console.warn('Workspace fetch error, falling back to default workspaces:', err)
-        setWorkspaces(DEMO_WORKSPACES)
-      } finally {
-        setIsLoading(false)
+        const retryText = await retryResp.text()
+        try {
+          const retryData = retryText ? JSON.parse(retryText) : []
+          setWorkspaces(Array.isArray(retryData) ? retryData as Workspace[] : [])
+        } catch { setWorkspaces([]) }
+        return
       }
+
+      const text = await resp.text()
+      if (!resp.ok) {
+        setError(`Failed to load workspaces (${resp.status}). Please try again.`)
+        return
+      }
+      let data: unknown = null
+      if (text) {
+        try { data = JSON.parse(text) } catch { data = null }
+      }
+
+      if (Array.isArray(data)) {
+        setWorkspaces(data as Workspace[])
+      } else {
+        setWorkspaces([])
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Network error'
+      setError(`Could not reach the server: ${msg}. Check your connection and try again.`)
+    } finally {
+      setIsLoading(false)
     }
-    void fetchWorkspaces()
-  }, [user?.id])
+  }
+
+  useEffect(() => {
+    // Wait until auth context has restored the session before fetching.
+    // Without this, getAccessToken() returns null and the request gets a 401.
+    if (!authLoading) {
+      void fetchWorkspaces()
+    }
+  }, [authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Select workspace ───────────────────────────────────────────────────
 
   async function handleSelect(workspaceId: string) {
     setSelecting(workspaceId)
     selectWorkspace(workspaceId)
-    // Short delay for selection feedback animation
-    await new Promise((r) => setTimeout(r, 300))
+    await new Promise((r) => setTimeout(r, 300)) // brief selection feedback
     void navigate('/app')
   }
 
-  function handleCreateWorkspace() {
-    const name = prompt('Enter a name for your new workspace:', 'New Intelligence Workspace')
-    if (!name || !name.trim()) return
+  // ── Create workspace (HIGH-5: API call, not local state only) ──────────
 
-    const newWs: Workspace = {
-      workspace_id: `ws-${Date.now().toString(36)}`,
-      name: name.trim(),
-      owner_id: user?.id ?? 'user',
+  async function handleCreateWorkspace(e: FormEvent) {
+    e.preventDefault()
+    const name = newWorkspaceName.trim()
+    if (!name) return
+
+    setIsCreating(true)
+    setCreateError(null)
+    try {
+      // Get freshest token — refresh if needed
+      let token = getAccessToken()
+      if (!token) {
+        const { data } = await supabase.auth.getSession()
+        if (data.session) {
+          setTokens(data.session.access_token, data.session.refresh_token)
+          token = data.session.access_token
+        }
+      }
+
+      const doCreate = async (t: string) => fetch('/api/workspaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
+        body: JSON.stringify({ name }),
+      })
+
+      let resp = await doCreate(token ?? '')
+
+      // Auto-refresh on 401 and retry once
+      if (resp.status === 401) {
+        const { data, error } = await supabase.auth.refreshSession()
+        if (error || !data.session) { void logout(); return }
+        setTokens(data.session.access_token, data.session.refresh_token)
+        resp = await doCreate(data.session.access_token)
+      }
+
+      if (!resp.ok) {
+        const msg = resp.status === 400
+          ? 'Invalid workspace name.'
+          : `Failed to create workspace (${resp.status}). Please try again.`
+        setCreateError(msg)
+        return
+      }
+
+      const created = await resp.json() as Workspace
+      setWorkspaces((prev) => [created, ...prev])
+      setShowCreateForm(false)
+      setNewWorkspaceName('')
+      void handleSelect(created.workspace_id)
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : 'Network error. Please try again.')
+    } finally {
+      setIsCreating(false)
     }
-
-    setWorkspaces((prev) => [newWs, ...prev])
-    void handleSelect(newWs.workspace_id)
   }
+
+  function openCreateForm() {
+    setShowCreateForm(true)
+    setCreateError(null)
+    setNewWorkspaceName('')
+    // Focus the input after animation
+    setTimeout(() => { createInputRef.current?.focus() }, 80)
+  }
+
+  function closeCreateForm() {
+    setShowCreateForm(false)
+    setCreateError(null)
+    setNewWorkspaceName('')
+  }
+
+  // ── Logout ─────────────────────────────────────────────────────────────
 
   async function handleLogout() {
     setIsLoggingOut(true)
-    await logout()
+    try {
+      await logout()
+    } catch (err) {
+      console.error('Logout error:', err)
+    }
     navigate('/login')
   }
 
+  // ── Animation variants ─────────────────────────────────────────────────
+
   const containerVariants = {
     hidden: {},
-    visible: {
-      transition: { staggerChildren: 0.07, delayChildren: 0.1 },
-    },
+    visible: { transition: { staggerChildren: 0.07, delayChildren: 0.1 } },
   }
 
   const itemVariants = {
@@ -206,7 +318,19 @@ export default function WorkspaceSelectPage() {
           <AnimatePresence>
             {error && (
               <div className="mb-4">
-                <Alert variant="error" message={error} onClose={() => setError(null)} />
+                <Alert
+                  variant="error"
+                  message={error}
+                  onClose={() => setError(null)}
+                />
+                <button
+                  type="button"
+                  onClick={() => { void fetchWorkspaces() }}
+                  className="mt-2 flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors mx-auto"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Retry
+                </button>
               </div>
             )}
           </AnimatePresence>
@@ -262,14 +386,10 @@ export default function WorkspaceSelectPage() {
                           }`}
                           aria-label={`Select workspace ${ws.name}`}
                         >
-                          {/* Workspace icon */}
-                          <div
-                            className={`w-10 h-10 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center shrink-0 shadow-md`}
-                          >
+                          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center shrink-0 shadow-md`}>
                             <Database className="w-5 h-5 text-white" />
                           </div>
 
-                          {/* Info */}
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-slate-100 truncate group-hover:text-white transition-colors">
                               {ws.name}
@@ -279,7 +399,6 @@ export default function WorkspaceSelectPage() {
                             </p>
                           </div>
 
-                          {/* Arrow */}
                           <div className={`transition-all duration-200 ${isSelected ? 'text-indigo-400' : 'text-slate-600 group-hover:text-indigo-400 group-hover:translate-x-0.5'}`}>
                             {isSelected ? (
                               <motion.div
@@ -299,17 +418,63 @@ export default function WorkspaceSelectPage() {
               )}
             </div>
 
-            {/* Footer action */}
+            {/* MED-4: Inline create form — replaces native browser prompt() */}
             {!isLoading && (
-              <div className="px-5 pb-5">
-                <button
-                  type="button"
-                  onClick={handleCreateWorkspace}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-dashed border-slate-700 hover:border-indigo-500/50 text-slate-500 hover:text-indigo-300 text-xs font-medium transition-all duration-200 hover:bg-indigo-500/5 mt-2 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Create new workspace
-                </button>
+              <div className="px-5 pb-5 flex flex-col gap-2">
+                <AnimatePresence>
+                  {showCreateForm && (
+                    <motion.form
+                      key="create-form"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.22 }}
+                      onSubmit={(e) => { void handleCreateWorkspace(e) }}
+                      className="overflow-hidden"
+                    >
+                      <div className="pt-2 pb-1 flex flex-col gap-2">
+                        <p className="text-xs font-semibold text-slate-300">New workspace name</p>
+                        <div className="flex gap-2">
+                          <Input
+                            ref={createInputRef}
+                            id="new-workspace-name"
+                            placeholder="e.g. Legal Document Analysis"
+                            value={newWorkspaceName}
+                            onChange={(e) => setNewWorkspaceName(e.target.value)}
+                            className="flex-1 text-sm py-2"
+                            disabled={isCreating}
+                            maxLength={80}
+                          />
+                          <Button type="submit" size="sm" isLoading={isCreating} disabled={!newWorkspaceName.trim()}>
+                            Create
+                          </Button>
+                          <button
+                            type="button"
+                            onClick={closeCreateForm}
+                            className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all shrink-0"
+                            aria-label="Cancel"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        {createError && (
+                          <p className="text-xs text-red-400">{createError}</p>
+                        )}
+                      </div>
+                    </motion.form>
+                  )}
+                </AnimatePresence>
+
+                {!showCreateForm && (
+                  <button
+                    type="button"
+                    onClick={openCreateForm}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-dashed border-slate-700 hover:border-indigo-500/50 text-slate-500 hover:text-indigo-300 text-xs font-medium transition-all duration-200 hover:bg-indigo-500/5 mt-2 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Create new workspace
+                  </button>
+                )}
               </div>
             )}
           </Card>

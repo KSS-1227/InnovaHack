@@ -2,19 +2,25 @@
  * React auth context — provides authentication state and methods.
  *
  * Session is persisted by Supabase (localStorage) so it survives page refresh.
- * tokenStore keeps an in-memory copy of the access token for API calls.
+ * tokenStore keeps an in-memory copy of the access token for synchronous API calls.
+ *
+ * Fixes applied:
+ *  - CRIT-2: Role now read from app_metadata first (not payload.role which is always "authenticated")
+ *  - CRIT-3: startRefreshLoop / stopRefreshLoop wired up on session apply / logout
+ *  - CRIT-4: Removed race-condition `initialised` ref — onAuthStateChange handles all events
+ *  - CRIT-5: displayName forwarded to supabase.auth.signUp via options.data
  */
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
-  useRef,
   useState,
   type ReactNode,
 } from 'react'
 import { supabase } from './supabaseClient'
-import { clearTokens, getAccessToken, setTokens } from './tokenStore'
+import { clearTokens, setTokens } from './tokenStore'
+import { startRefreshLoop, stopRefreshLoop } from './refreshLoop'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,7 +38,7 @@ export interface AuthContextValue {
   isAuthenticated: boolean
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string) => Promise<void>
+  register: (email: string, password: string, displayName?: string) => Promise<void>
   logout: () => Promise<void>
   selectWorkspace: (id: string) => void
 }
@@ -57,8 +63,6 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     try { return localStorage.getItem(WS_KEY) } catch { return null }
   })
   const [isLoading, setIsLoading] = useState(true)
-  // Track whether initial session check is done
-  const initialised = useRef(false)
 
   // ── Session → user state ─────────────────────────────────────────────────
 
@@ -70,20 +74,26 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     } | null) => {
       if (!session) {
         clearTokens()
+        stopRefreshLoop()  // CRIT-3: stop refresh loop on sign-out
         setUser(null)
         return
       }
+
       setTokens(session.access_token, session.refresh_token)
-      // Decode role from JWT payload
+      startRefreshLoop()  // CRIT-3: start refresh loop on sign-in
+
+      // CRIT-2: Read custom app role from app_metadata first.
+      // payload.role in a Supabase JWT is ALWAYS "authenticated" — not the custom role.
       let role = 'Viewer'
       try {
         const payload = JSON.parse(atob(session.access_token.split('.')[1]))
-        role = (payload.role as string | undefined)
-          ?? (payload.app_metadata?.role as string | undefined)
+        role = (payload.app_metadata?.role as string | undefined)
+          ?? (payload.user_metadata?.role as string | undefined)
           ?? 'Viewer'
       } catch {
         // Malformed token — keep default role
       }
+
       setUser({
         id: session.user.id,
         email: session.user.email ?? '',
@@ -94,21 +104,17 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   )
 
   // ── Subscribe to Supabase auth state ─────────────────────────────────────
+  //
+  // CRIT-4: Removed the `initialised` ref guard which caused a race condition
+  // where SIGNED_IN events fired during OAuth callback were silently dropped.
+  // Supabase fires INITIAL_SESSION on subscription so no separate getSession()
+  // call is needed — onAuthStateChange handles both initial state and changes.
 
   useEffect(() => {
-    // Initial session check (handles page refresh + OAuth callback)
-    supabase.auth.getSession().then(({ data }) => {
-      applySession(data.session)
-      setIsLoading(false)
-      initialised.current = true
-    })
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
-        // Only apply state changes after initial check to avoid race conditions
-        if (initialised.current) {
-          applySession(session)
-        }
+        applySession(session)
+        setIsLoading(false)
       }
     )
 
@@ -123,14 +129,29 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     if (data.session) applySession(data.session)
   }, [applySession])
 
-  const register = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password })
+  // CRIT-5: displayName is now forwarded to Supabase user metadata
+  const register = useCallback(async (
+    email: string,
+    password: string,
+    displayName?: string,
+  ) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: displayName ? { display_name: displayName } : undefined,
+      },
+    })
     if (error) throw error
   }, [])
 
   const logout = useCallback(async () => {
-    const token = getAccessToken()
-    if (token) await supabase.auth.signOut()
+    stopRefreshLoop()  // CRIT-3: stop loop before sign-out
+    try {
+      await supabase.auth.signOut()
+    } catch (err) {
+      console.error('Supabase signOut error:', err)
+    }
     clearTokens()
     setUser(null)
     setWorkspaceId(null)
