@@ -30,6 +30,7 @@ from backend.auth.routes.profile import router as profile_router
 from backend.auth.routes.workspace import router as workspace_router
 from backend.auth.routes.audit import router as audit_router
 from backend.api.routes.storage import router as storage_router
+from backend.auth.middleware.jwt_middleware import _get_jwks
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,19 @@ app.include_router(profile_router, prefix="/api/auth")
 app.include_router(workspace_router, prefix="/api/workspaces")
 app.include_router(audit_router, prefix="/api/workspaces")
 app.include_router(storage_router, prefix="/api", dependencies=[Depends(get_current_user)])
+
+
+# ------------------------------
+# Startup: pre-warm JWKS cache so first request never 503s
+# ------------------------------
+
+@app.on_event("startup")
+async def _prewarm_jwks():
+    try:
+        await _get_jwks()
+        logger.info("JWKS cache pre-warmed successfully")
+    except Exception as exc:
+        logger.warning("JWKS pre-warm failed (will retry on first request): %s", exc)
 
 
 # ------------------------------

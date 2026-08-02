@@ -29,7 +29,6 @@ from backend.auth.rbac.permissions import Permission
 from backend.auth.services import workspace_service
 
 router = APIRouter(
-    prefix="/workspaces",
     tags=["Workspaces"],
 )
 
