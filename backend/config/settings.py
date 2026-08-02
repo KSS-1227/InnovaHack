@@ -12,13 +12,13 @@ load_dotenv()
 from sentence_transformers import SentenceTransformer
 
 # ============ LLM Configuration ============
-API_KEY   = os.environ.get("LLM_API_KEY",    "Looking for the API key? So am I.")
-API_BASE  = os.environ.get("LLM_API_BASE",   "https://dashscope.aliyuncs.com/compatible-mode/v1")
-MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "qwen3-max")
+API_KEY   = os.environ.get("LLM_API_KEY",    "")
+API_BASE  = os.environ.get("LLM_API_BASE",   "https://api.openai.com/v1")
+MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "gpt-4o")
 
-MM_API_KEY   = os.environ.get("MM_API_KEY",    "If you find it, please don't tell me. That's safer for both of us.")
-MM_API_BASE  = os.environ.get("MM_API_BASE",   "https://dashscope.aliyuncs.com/compatible-mode/v1")
-MM_MODEL_NAME = os.environ.get("MM_MODEL_NAME", "qwen-vl-max")
+MM_API_KEY   = os.environ.get("MM_API_KEY",    "")
+MM_API_BASE  = os.environ.get("MM_API_BASE",   "https://api.openai.com/v1")
+MM_MODEL_NAME = os.environ.get("MM_MODEL_NAME", "gpt-4o")
 
 # ============ Embedding Model ============
 _default_embed_dir = "./models/all-MiniLM-L6-v2" if os.path.exists("./models/all-MiniLM-L6-v2") else "sentence-transformers/all-MiniLM-L6-v2"

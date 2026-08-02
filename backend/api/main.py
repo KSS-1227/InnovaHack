@@ -24,6 +24,7 @@ from backend.api.routes.workspace_upload import router as ws_upload_router
 from backend.api.routes.workspace_query import router as ws_query_router
 from backend.api.routes.workspace_graph import router as ws_graph_router
 from backend.api.routes.workspace_report import router as ws_report_router
+from backend.api.routes.graph import router as global_graph_router
 
 from backend.auth.routes.auth import router as auth_router
 from backend.auth.routes.profile import router as profile_router
@@ -95,6 +96,7 @@ app.include_router(ws_query_router,  prefix="/api", dependencies=[Depends(get_cu
 app.include_router(ws_graph_router,  prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(ws_report_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(cases_router,     prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(global_graph_router, prefix="/api", dependencies=[Depends(get_current_user)])
 
 # ------------------------------
 # Routers — auth & workspace (endpoints handle their own auth internally)

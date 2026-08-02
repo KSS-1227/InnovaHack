@@ -11,6 +11,8 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Database, Network, RefreshCw, Search, Share2, X } from 'lucide-react'
+import { getAccessToken } from '../../auth/tokenStore'
+import { useAuth } from '../../auth/AuthContext'
 
 interface NetworkEntity {
   id: string
@@ -99,6 +101,7 @@ function buildFlowEdges(relationships: NetworkRelationship[]): Edge[] {
 }
 
 export default function KnowledgeGraphPage() {
+  const { workspaceId } = useAuth()
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<GraphNodeData>>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [search, setSearch] = useState('')
@@ -111,8 +114,13 @@ export default function KnowledgeGraphPage() {
     setLoading(true)
     setError(null)
 
+    const token = getAccessToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    if (workspaceId) headers['X-Workspace-ID'] = workspaceId
+
     try {
-      const response = await fetch('/api/graph/network')
+      const response = await fetch('/api/graph/network', { headers })
       if (!response.ok) throw new Error(`Unable to load graph (${response.status})`)
 
       const payload = (await response.json()) as NetworkPayload
@@ -125,7 +133,7 @@ export default function KnowledgeGraphPage() {
     } finally {
       setLoading(false)
     }
-  }, [setEdges, setNodes])
+  }, [setEdges, setNodes, workspaceId])
 
   useEffect(() => {
     void loadGraph()

@@ -8,10 +8,11 @@ import {
   Loader2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { getAccessToken } from "../../auth/tokenStore";
 
 interface CaseItem {
   id: string;
-  name: string;
+  title: string;
   description?: string;
   status: "processing" | "completed" | "failed";
   created_at: string;
@@ -20,7 +21,7 @@ interface CaseItem {
   edges: number;
 }
 
-const API = "http://localhost:8000/api";
+const API = "/api";
 
 export default function CasesPage() {
 
@@ -38,6 +39,11 @@ export default function CasesPage() {
   const [newCaseName, setNewCaseName] =
     useState("");
 
+  function authHeaders(): HeadersInit {
+    const token = getAccessToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
   async function loadCases() {
 
     try {
@@ -45,13 +51,13 @@ export default function CasesPage() {
       setLoading(true);
 
       const response = await fetch(
-        `${API}/cases`
+        `${API}/cases`,
+        { headers: authHeaders() }
       );
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
-      setCases(data);
+      setCases(data?.cases ?? data ?? []);
 
     } catch (err) {
 
@@ -82,17 +88,16 @@ export default function CasesPage() {
         {
           method: "POST",
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
+            ...authHeaders(),
           },
           body: JSON.stringify({
-            name: newCaseName,
+            title: newCaseName,   // backend expects "title"
           }),
         }
       );
 
-      if (!response.ok)
-        throw new Error();
+      if (!response.ok) throw new Error();
 
       setNewCaseName("");
 
@@ -112,7 +117,7 @@ export default function CasesPage() {
 
     return cases.filter((c) =>
 
-      c.name
+      (c.title ?? "")
         .toLowerCase()
         .includes(search.toLowerCase())
 
@@ -332,7 +337,7 @@ export default function CasesPage() {
 
                   <h2 className="text-xl font-semibold">
 
-                    {item.name}
+                    {item.title}
 
                   </h2>
 

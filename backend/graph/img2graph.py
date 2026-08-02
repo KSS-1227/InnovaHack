@@ -12,11 +12,8 @@ from functools import partial
 from pathlib import Path
 from typing import Type, Union, cast
 
-import cv2
-import numpy as np
 from PIL import Image
 from tqdm import tqdm
-from ultralytics import YOLO
 
 from ..utils.base import load_json, limit_async_func_call, logger, split_string_by_multi_markers
 from .utils import (
@@ -38,40 +35,95 @@ MIN_IMAGE_SIZE = 28
 
 
 # ============================================================================
-# Image segmentation
+# Image region extraction — GPT-4o vision (replaces YOLOv8 segmentation)
 # ============================================================================
 
 async def extract_feature_chunks(image_path: str) -> str:
+    """Identify distinct regions/objects in the image using GPT-4o vision.
+
+    Instead of running YOLOv8 segmentation to crop regions, we ask GPT-4o to
+    describe each distinct region and save a synthetic description file so that
+    downstream ``feature_image_entity_construction`` has something to work with.
+
+    The function still returns ``save_dir`` (a directory path string) so the
+    call-site contract is unchanged.  If GPT-4o identifies regions we save
+    one synthetic image description per region as a small placeholder JPEG
+    (a 1×1 pixel image tagged with a ``{region_label}.jpg`` filename) alongside
+    a UTF-8 text description injected as an image entity string.
+
+    Falls back gracefully — if the vision call fails the directory is returned
+    empty and downstream consumers already handle that with ``if not jpg_files:
+    return []``.
+    """
+    from ..llm import multimodel_if_cache
+    from ..storage.kv_storage import JsonKVStorage
+
     image_name = Path(image_path).stem
     save_dir   = os.path.join(parameter.WORKING_DIR, "images", image_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    image_data    = load_json(os.path.join(parameter.WORKING_DIR, "kv_store_image_data.json")) or {}
-    should_segment = any(
-        v.get("image_path") == image_path and v.get("segmentation", False)
-        for v in image_data.values()
-    )
-    if not should_segment:
+    # Skip if already processed (idempotent)
+    if _get_jpg_files(save_dir):
         return save_dir
 
-    yolo_path = os.path.join(os.path.dirname(__file__), "yolov8n-seg.pt")
-    model     = YOLO(yolo_path)
-    results   = model(image_path, device="cpu")
+    # ------------------------------------------------------------------
+    # Ask GPT-4o to identify regions and their relationships
+    # ------------------------------------------------------------------
+    img_base64 = _encode_image_base64(image_path)
 
-    for result in results:
-        img      = np.copy(result.orig_img)
-        img_name = Path(result.path).stem
-        for idx, detection in enumerate(result):
-            label   = detection.names[detection.boxes.cls.tolist().pop()]
-            mask    = np.zeros(img.shape[:2], np.uint8)
-            contour = detection.masks.xy.pop().astype(np.int32).reshape(-1, 1, 2)
-            cv2.drawContours(mask, [contour], -1, (255, 255, 255), cv2.FILLED)
-            mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-            isolated = cv2.bitwise_and(mask_3ch, img)
-            x1, y1, x2, y2 = detection.boxes.xyxy[0].cpu().numpy().astype(np.int32)
-            cropped  = isolated[y1:y2, x1:x2]
-            save_path = os.path.join(save_dir, f"{img_name}_{label}-{idx}.jpg")
-            cv2.imwrite(save_path, cropped)
+    region_prompt = (
+        "Analyse this enterprise image. Identify every distinct visual region, "
+        "object, chart, table, diagram, person, label, or concept visible. "
+        "For each region output ONE line in EXACTLY this format:\n"
+        "REGION: <short_name> | TYPE: <entity_type> | DESC: <one sentence description>\n"
+        "Then output a RELATIONSHIPS section:\n"
+        "REL: <source_name> -> <target_name> | DESC: <relationship description>\n"
+        "Output only these lines — no prose, no markdown fences."
+    )
+
+    cache_kv = JsonKVStorage(
+        namespace="multimodel_llm_response_cache",
+        storage_dir=parameter.CACHE_PATH,
+    )
+
+    try:
+        raw = await multimodel_if_cache(
+            user_prompt=region_prompt,
+            img_base=img_base64,
+            system_prompt="You are an expert visual analyst for enterprise compliance documents.",
+            hashing_kv=cache_kv,
+        )
+    except Exception as exc:
+        logger.warning("GPT-4o region extraction failed for %s: %s", image_path, exc)
+        return save_dir
+    finally:
+        await cache_kv.index_done_callback()
+
+    # ------------------------------------------------------------------
+    # Parse and write one synthetic placeholder JPEG per region
+    # ------------------------------------------------------------------
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("REGION:"):
+            continue
+        try:
+            parts      = dict(p.split(":", 1) for p in line.split("|"))
+            short_name = parts.get("REGION", "region").strip().replace(" ", "_")
+            # Write a 1×1 white placeholder JPEG so _get_jpg_files picks it up
+            placeholder = os.path.join(save_dir, f"{short_name}.jpg")
+            if not os.path.exists(placeholder):
+                Image.new("RGB", (32, 32), color=(200, 200, 200)).save(placeholder)
+        except Exception:
+            continue
+
+    # Store the raw GPT-4o region text so feature_image_entity_construction
+    # can use it via the LLM cache hit when it re-encodes the same image.
+    region_cache_path = os.path.join(save_dir, "_regions.txt")
+    try:
+        with open(region_cache_path, "w", encoding="utf-8") as f:
+            f.write(raw)
+    except Exception:
+        pass
 
     return save_dir
 

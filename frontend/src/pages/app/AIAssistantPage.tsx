@@ -7,6 +7,8 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { getAccessToken } from "../../auth/tokenStore";
+import { useAuth } from "../../auth/AuthContext";
 
 interface Citation {
   source: string;
@@ -35,7 +37,7 @@ interface ChatMessage {
   response?: AssistantResponse;
 }
 
-const API = "http://localhost:8000/api";
+const API = "/api";
 
 const suggestedQuestions = [
   "Summarize this compliance report",
@@ -46,13 +48,20 @@ const suggestedQuestions = [
 ];
 
 export default function AIAssistantPage() {
+  const { workspaceId } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-
   const [question, setQuestion] = useState("");
-
   const [loading, setLoading] = useState(false);
-
+  const [caseId, setCaseId] = useState<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  function authHeaders(): Record<string, string> {
+    const token = getAccessToken();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (workspaceId) headers["X-Workspace-ID"] = workspaceId;
+    return headers;
+  }
 
   async function askQuestion() {
     if (!question.trim()) return;
@@ -64,42 +73,31 @@ export default function AIAssistantPage() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
-
     const currentQuestion = question;
-
     setQuestion("");
-
     setLoading(true);
 
     try {
-      const response = await fetch(
-        `${API}/query`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            question: currentQuestion,
-          }),
-        }
-      );
+      const response = await fetch(`${API}/query/`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          question: currentQuestion,
+          case_id: caseId,
+          top_k: 10,
+        }),
+      });
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: data.answer,
-        response: data,
+        content: data.result?.answer ?? data.answer ?? "No answer returned.",
+        response: data.result ?? data,
       };
 
-      setMessages((prev) => [
-        ...prev,
-        assistantMessage,
-      ]);
+      setMessages((prev) => [...prev, assistantMessage]);
     } catch (err) {
       console.error(err);
     } finally {
@@ -162,6 +160,16 @@ export default function AIAssistantPage() {
 
           </button>
 
+        </div>
+
+        <div className="px-5 pb-4">
+          <label className="block text-xs text-zinc-400 mb-1">Case ID (required)</label>
+          <input
+            value={caseId}
+            onChange={(e) => setCaseId(e.target.value)}
+            placeholder="Paste your case_id here"
+            className="w-full rounded-xl bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+          />
         </div>
 
         <div className="px-5">
